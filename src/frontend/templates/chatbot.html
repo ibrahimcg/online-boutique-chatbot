@@ -1,0 +1,243 @@
+<!-- templates/chatbot.html -->
+<!-- Chatbot Toggle Button -->
+<button id="chat-toggle" style="
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  background-color: #4CAF50;
+  color: white;
+  border: none;
+  cursor: pointer;
+  box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+  font-size: 24px;
+  z-index: 1000;
+">
+  💬
+</button>
+
+<!-- Chat Window -->
+<div id="chat-window" style="
+  position: fixed;
+  bottom: 90px;
+  right: 20px;
+  width: 350px;
+  height: 450px;
+  background-color: white;
+  border: 1px solid #ccc;
+  border-radius: 10px;
+  box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+  display: none;
+  flex-direction: column;
+  z-index: 1000;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+">
+  <!-- Chat Header -->
+  <div style="
+    background-color: #4CAF50;
+    color: white;
+    padding: 15px;
+    border-top-left-radius: 10px;
+    border-top-right-radius: 10px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  ">
+    <h3 style="margin: 0; font-size: 16px;">Shopping Assistant</h3>
+    <button id="chat-close" style="
+      background: none;
+      border: none;
+      color: white;
+      font-size: 20px;
+      cursor: pointer;
+      padding: 0;
+      width: 24px;
+      height: 24px;
+    ">×</button>
+  </div>
+  
+  <!-- Chat Messages Area -->
+  <div id="chat-messages" style="
+    flex: 1;
+    overflow-y: auto;
+    padding: 15px;
+    background-color: #f9f9f9;
+  "></div>
+  
+  <!-- Chat Input Area -->
+  <div style="display: flex; padding: 15px; border-top: 1px solid #eee; background-color: white;">
+    <input type="text" id="chat-input" placeholder="Ask about our products..." style="
+      flex: 1;
+      padding: 10px;
+      border: 1px solid #ccc;
+      border-radius: 20px;
+      margin-right: 10px;
+      font-size: 14px;
+    ">
+    <button id="send-message" style="
+      padding: 10px 20px;
+      background-color: #4CAF50;
+      color: white;
+      border: none;
+      border-radius: 20px;
+      cursor: pointer;
+      font-size: 14px;
+    ">Send</button>
+  </div>
+</div>
+
+<!-- Chatbot Styles -->
+<style>
+  #chat-messages::-webkit-scrollbar {
+    width: 6px;
+  }
+  
+  #chat-messages::-webkit-scrollbar-track {
+    background: #f1f1f1;
+  }
+  
+  #chat-messages::-webkit-scrollbar-thumb {
+    background: #888;
+    border-radius: 3px;
+  }
+  
+  .chat-message {
+    margin-bottom: 12px;
+    padding: 10px;
+    border-radius: 10px;
+    max-width: 80%;
+    word-wrap: break-word;
+    line-height: 1.4;
+    font-size: 14px;
+  }
+  
+  .user-message {
+    background-color: #e3f2fd;
+    margin-left: auto;
+    border-bottom-right-radius: 0;
+  }
+  
+  .assistant-message {
+    background-color: #f5f5f5;
+    margin-right: auto;
+    border-bottom-left-radius: 0;
+  }
+  
+  .typing-indicator {
+    color: #999;
+    font-style: italic;
+    padding: 10px;
+  }
+</style>
+
+<!-- Chatbot JavaScript -->
+<script>
+  document.addEventListener('DOMContentLoaded', function() {
+    const chatToggle = document.getElementById('chat-toggle');
+    const chatWindow = document.getElementById('chat-window');
+    const chatMessages = document.getElementById('chat-messages');
+    const chatInput = document.getElementById('chat-input');
+    const sendMessage = document.getElementById('send-message');
+    const chatClose = document.getElementById('chat-close');
+    
+    let isOpen = false;
+    
+    // Toggle chat window
+    chatToggle.addEventListener('click', toggleChat);
+    chatClose.addEventListener('click', toggleChat);
+    
+    function toggleChat() {
+      isOpen = !isOpen;
+      chatWindow.style.display = isOpen ? 'flex' : 'none';
+      if (isOpen) {
+        chatInput.focus();
+        if (chatMessages.children.length === 0) {
+          addMessage('Welcome to Online Boutique! I\'m your shopping assistant. How can I help you today?', 'assistant');
+        }
+      }
+    }
+    
+    // Add message to chat
+    function addMessage(message, sender) {
+      const messageDiv = document.createElement('div');
+      messageDiv.className = `chat-message ${sender}-message`;
+      messageDiv.textContent = message;
+      chatMessages.appendChild(messageDiv);
+      chatMessages.scrollTop = chatMessages.scrollHeight;
+    }
+    
+    // Show typing indicator
+    function showTypingIndicator() {
+      const typingDiv = document.createElement('div');
+      typingDiv.className = 'typing-indicator';
+      typingDiv.id = 'typing-indicator';
+      typingDiv.textContent = 'Assistant is typing...';
+      chatMessages.appendChild(typingDiv);
+      chatMessages.scrollTop = chatMessages.scrollHeight;
+    }
+    
+    // Remove typing indicator
+    function removeTypingIndicator() {
+      const typingDiv = document.getElementById('typing-indicator');
+      if (typingDiv) {
+        typingDiv.remove();
+      }
+    }
+    
+    // Send message
+    async function sendChatMessage() {
+      const message = chatInput.value.trim();
+      if (!message) return;
+      
+      // Add user message
+      addMessage(message, 'user');
+      chatInput.value = '';
+      
+      // Show typing indicator
+      showTypingIndicator();
+      
+      try {
+        // Use absolute path for API endpoint
+        const response = await fetch('/api/chat', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ message: message }),
+          credentials: 'same-origin'
+        });
+        
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
+        const data = await response.json();
+        
+        // Remove typing indicator
+        removeTypingIndicator();
+        
+        // Add assistant response
+        // Check various response formats
+        const responseText = data.response || data.message || data.reply || 'I\'m sorry, I couldn\'t understand that. Could you please rephrase?';
+        addMessage(responseText, 'assistant');
+        
+      } catch (error) {
+        console.error('Chat error:', error);
+        removeTypingIndicator();
+        addMessage('Sorry, I\'m having trouble connecting right now. Please try again in a moment.', 'assistant');
+      }
+    }
+    
+    // Event listeners
+    sendMessage.addEventListener('click', sendChatMessage);
+    
+    chatInput.addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        sendChatMessage();
+      }
+    });
+  });
+</script>

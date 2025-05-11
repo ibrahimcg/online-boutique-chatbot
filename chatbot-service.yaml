@@ -1,0 +1,118 @@
+# Chatbot Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: chatbot-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: chatbot-service
+  template:
+    metadata:
+      labels:
+        app: chatbot-service
+    spec:
+      containers:
+      - name: chatbot
+        image: node:18-alpine
+        workingDir: /app
+        command: ["node", "server.js"]
+        ports:
+        - containerPort: 3000
+        env:
+        - name: OLLAMA_URL
+          value: "http://ollama-service:11434"
+        volumeMounts:
+        - name: chatbot-code
+          mountPath: /app
+      volumes:
+      - name: chatbot-code
+        configMap:
+          name: chatbot-config
+---
+# Service for Chatbot
+apiVersion: v1
+kind: Service
+metadata:
+  name: chatbot-service
+spec:
+  selector:
+    app: chatbot-service
+  ports:
+  - port: 80
+    targetPort: 3000
+  type: ClusterIP
+---
+# ConfigMap with chatbot code
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: chatbot-config
+data:
+  server.js: |
+    const http = require('http');
+    const url = require('url');
+    
+    const OLLAMA_URL = process.env.OLLAMA_URL || 'http://ollama-service:11434';
+    
+    const server = http.createServer(async (req, res) => {
+      // Enable CORS
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+      
+      if (req.method === 'OPTIONS') {
+        res.writeHead(200);
+        res.end();
+        return;
+      }
+      
+      if (req.method === 'POST' && req.url === '/api/chat') {
+        let body = '';
+        req.on('data', chunk => {
+          body += chunk.toString();
+        });
+        
+        req.on('end', async () => {
+          try {
+            const { message } = JSON.parse(body);
+            
+            // Forward request to Ollama
+            const ollamaRes = await fetch(`${OLLAMA_URL}/api/generate`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                model: 'smollm2:135m-instruct-q4_K_M',
+                prompt: message,
+                stream: false
+              })
+            });
+            
+            const data = await ollamaRes.json();
+            res.writeHead(200, {'Content-Type': 'application/json'});
+            res.end(JSON.stringify({ response: data.response }));
+          } catch (error) {
+            res.writeHead(500, {'Content-Type': 'application/json'});
+            res.end(JSON.stringify({ error: error.message }));
+          }
+        });
+      } else {
+        res.writeHead(404);
+        res.end('Not found');
+      }
+    });
+    
+    server.listen(3000, () => {
+      console.log('Chatbot service running on port 3000');
+    });
+  package.json: |
+    {
+      "name": "chatbot-service",
+      "version": "1.0.0",
+      "dependencies": {
+        "node-fetch": "^2.6.1"
+      }
+    }
