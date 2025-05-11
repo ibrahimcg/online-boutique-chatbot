@@ -1,4 +1,4 @@
-# Chatbot Deployment
+# chatbot-service.yaml
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -23,13 +23,25 @@ spec:
         env:
         - name: OLLAMA_URL
           value: "http://ollama-service:11434"
+        - name: PRODUCTS_FILE
+          value: "/data/products.json"
         volumeMounts:
         - name: chatbot-code
           mountPath: /app
+        - name: products-catalog
+          mountPath: /data
       volumes:
       - name: chatbot-code
         configMap:
           name: chatbot-config
+      - name: products-catalog
+        configMap:
+          name: products-catalog
+          items:
+          - key: products.json
+            path: products.json
+---
+# ... rest of the YAML remains the same
 ---
 # Service for Chatbot
 apiVersion: v1
@@ -52,10 +64,56 @@ metadata:
 data:
   server.js: |
     const http = require('http');
-    const url = require('url');
-    
+    const fs = require('fs').promises;
     const OLLAMA_URL = process.env.OLLAMA_URL || 'http://ollama-service:11434';
-    
+    const PRODUCTS_FILE = process.env.PRODUCTS_FILE || '/data/products.json';
+
+    let productsData = null;
+
+    // Load products on startup
+    async function loadProducts() {
+      try {
+        const data = await fs.readFile(PRODUCTS_FILE, 'utf8');
+        productsData = JSON.parse(data);
+        console.log(`Loaded ${productsData.products.length} products`);
+      } catch (error) {
+        console.error('Error loading products:', error);
+        productsData = { products: [] };
+      }
+    }
+
+    // Format products for the AI
+    function formatProductsForAI() {
+      if (!productsData || !productsData.products) return "No products available.";
+      
+      return productsData.products.map(product => {
+        const price = product.priceUsd.units + (product.priceUsd.nanos / 1000000000);
+        return `- ${product.name}: ${product.description} Price: $${price.toFixed(2)} Categories: ${product.categories.join(', ')}`;
+      }).join('\n');
+    }
+
+    // Shopping assistant system prompt with dynamic products
+    function getShoppingAssistantPrompt() {
+      const productsList = formatProductsForAI();
+      
+      return `You are a helpful shopping assistant for our online boutique. You have access to our current product catalog.
+
+    Current Products Available:
+    ${productsList}
+
+    Your role is to:
+    1. Help customers find products they're looking for
+    2. Provide accurate product recommendations based on our catalog
+    3. Answer questions about specific products, prices, and availability
+    4. Suggest complementary items from our catalog
+    5. Be friendly, helpful, and professional
+
+    When customers ask about products, refer to the catalog above for accurate information including names, descriptions, 
+    prices, and categories. Always provide specific product names and prices when recommending items.
+
+    Customer: `;
+    }
+
     const server = http.createServer(async (req, res) => {
       // Enable CORS
       res.setHeader('Access-Control-Allow-Origin', '*');
@@ -78,25 +136,49 @@ data:
           try {
             const { message } = JSON.parse(body);
             
+            // Reload products periodically or on demand
+            if (!productsData || Math.random() < 0.1) { // 10% chance to reload
+              await loadProducts();
+            }
+            
+            // Prepare the prompt with current product catalog
+            const fullPrompt = getShoppingAssistantPrompt() + message + "\nAssistant: ";
+            
             // Forward request to Ollama
-            const ollamaRes = await fetch(`${OLLAMA_URL}/api/generate`, {
+            const requestBody = JSON.stringify({
+              model: 'smollm2:135m-instruct-q4_K_M',
+              prompt: fullPrompt,
+              stream: false,
+              options: {
+                temperature: 0.7,
+                max_tokens: 300,
+                stop: ["\nCustomer:", "\nHuman:", "\nUser:"]
+              }
+            });
+            
+            const response = await fetch(`${OLLAMA_URL}/api/generate`, {
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',
               },
-              body: JSON.stringify({
-                model: 'smollm2:135m-instruct-q4_K_M',
-                prompt: message,
-                stream: false
-              })
+              body: requestBody
             });
             
-            const data = await ollamaRes.json();
+            const data = await response.json();
+            
+            // Extract and clean the response
+            let assistantResponse = data.response || "I'm sorry, I couldn't process that request.";
+            assistantResponse = assistantResponse.replace(/^(Assistant:|AI:|Bot:)\s*/i, '');
+            
             res.writeHead(200, {'Content-Type': 'application/json'});
-            res.end(JSON.stringify({ response: data.response }));
+            res.end(JSON.stringify({ response: assistantResponse }));
           } catch (error) {
+            console.error('Error:', error);
             res.writeHead(500, {'Content-Type': 'application/json'});
-            res.end(JSON.stringify({ error: error.message }));
+            res.end(JSON.stringify({ 
+              error: 'Internal server error',
+              response: "I'm sorry, I'm having trouble right now. Please try again in a moment."
+            }));
           }
         });
       } else {
@@ -104,9 +186,11 @@ data:
         res.end('Not found');
       }
     });
-    
-    server.listen(3000, () => {
-      console.log('Chatbot service running on port 3000');
+
+    server.listen(3000, async () => {
+      console.log('Shopping assistant chatbot service running on port 3000');
+      // Load products on startup
+      await loadProducts();
     });
   package.json: |
     {
